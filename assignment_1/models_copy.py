@@ -9,6 +9,7 @@ from typing import List
 from sentiment_data import *
 from utils import *
 from collections import Counter
+import matplotlib.pyplot as plt
 
 
 class FeatureExtractor(object):
@@ -41,22 +42,20 @@ class UnigramFeatureExtractor(FeatureExtractor):
     def __init__(self, indexer: Indexer):
         self.indexer = indexer
 
-    def extract_features(self, sentence, add_to_indexer, lowercase=False):
+    def get_indexer(self):
+        return self.indexer
+
+    def extract_features(self, sentence, add_to_indexer, lowercase=True):
         feature = Counter()
         for word in sentence:
-            if lowercase:
-                word = word.lower()
-            
-            # get the index (add_and_get_index vs index_of depending on the flag)
-            if add_to_indexer:
-                index = self.indexer.add_and_get_index(word)
-            else:
-                index = self.indexer.index_of(word)
+            if lowercase: word = word.lower()
 
-            # Only add known words
+            # get the index
+            index = self.indexer.add_and_get_index(word) if add_to_indexer else self.indexer.index_of(word)
+            
             # if the index is -1, skip; otherwise feats[index] += 1
-            if index != -1:
-                feature[index] += 1
+            if index != -1: feature[index] += 1
+
         return feature
 
 
@@ -94,10 +93,115 @@ class LogisticRegressionClassifier(SentimentClassifier):
         self.feature_extractor = feature_extractor
 
     def predict(self, sentence):
-        features = self.feature_extractor.extract_features(sentence=sentence, add_to_indexer=False, lowercase=True)
+        features = self.feature_extractor.extract_features(sentence=sentence, add_to_indexer=False)
         idxs, values = list(features.keys()), list(features.values())
         selected_weights = self.W[idxs]
 
         z = np.dot(np.array(selected_weights), np.array(values))
+        pred = 1.0/(1.0 + np.exp(-1 * z))
 
-        return 1/(1 + np.exp(-1 * z))
+        return 1 if pred > 0.5 else 0
+
+def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor: FeatureExtractor) -> LogisticRegressionClassifier:
+    """
+    Train a logistic regression model.
+    :param train_exs: training set, List of SentimentExample objects
+    :param feat_extractor: feature extractor to use
+    :return: trained LogisticRegressionClassifier model
+    """
+    # build the indexer (vocabulary)
+    for sample in train_exs:
+        _ = feat_extractor.extract_features(sample.words, add_to_indexer=True)
+    vocab_size = len(feat_extractor.get_indexer())
+    weights = np.zeros(vocab_size)
+
+    lr_start = 0.005
+    epochs = 100
+
+    dev_exs = read_sentiment_examples("data/dev.txt")
+    dev_accuracies = []
+
+    for epoch in range(epochs):
+        random.shuffle(train_exs)
+        for sample in train_exs:
+            # extract features
+            words, label = sample.words, sample.label
+            features = feat_extractor.extract_features(sentence=words, add_to_indexer=False)
+
+            # compute scores
+            idxs, values = list(features.keys()), list(features.values())
+            selected_weights = weights[idxs]
+            z = np.dot(np.array(selected_weights), np.array(values))
+            pred = 1 / (1 + np.exp(-1 * z))
+            error = pred - label
+
+            # weight updated
+            lr = lr_start / (1 + 0.01 * epoch)
+            for idx, val in features.items():
+                weights[idx] -= lr * val * error
+
+        tempCLf = LogisticRegressionClassifier(weights=weights, feature_extractor=feat_extractor)
+        accuracy = 0
+        for sample in dev_exs:
+            words, label = sample.words, sample.label
+            pred = tempCLf.predict(words)
+            if pred == label: accuracy += 1
+        dev_accuracies.append(accuracy / len(dev_exs))
+        print(f"Epoch: [{epoch+1}/{epochs}], Accuracy: {np.round(accuracy / len(dev_exs), 5)}")
+
+    # plt.plot(dev_accuracies)
+    # plt.xlabel('Epochs')
+    # plt.ylabel('Accuracy')
+    # plt.title('Dev accuracy v/s Epoch')
+    # plt.show()
+
+    return LogisticRegressionClassifier(weights=weights, feature_extractor=feat_extractor)
+        
+
+def train_linear_model(args, train_exs: List[SentimentExample], dev_exs: List[SentimentExample]) -> SentimentClassifier:
+    """
+    Main entry point for your linear model. You may modify this, but do not need to.
+    :param args: args bundle from sentiment_classifier.py
+    :param train_exs: training set, List of SentimentExample objects
+    :param dev_exs: dev set, List of SentimentExample objects. You can use this for validation throughout the training
+    process, but you should *not* directly train on this data.
+    :return: trained SentimentClassifier model, of whichever type is specified
+    """
+    # Initialize feature extractor
+    if args.model == "TRIVIAL":
+        feat_extractor = None
+    elif args.feats == "UNIGRAM":
+        # Add additional preprocessing code here
+        feat_extractor = UnigramFeatureExtractor(Indexer())
+    elif args.feats == "BIGRAM":
+        # Add additional preprocessing code here
+        feat_extractor = BigramFeatureExtractor(Indexer())
+    elif args.feats == "BETTER":
+        # Add additional preprocessing code here
+        feat_extractor = BetterFeatureExtractor(Indexer())
+    else:
+        raise Exception("Pass in UNIGRAM, BIGRAM, or BETTER to run the appropriate system")
+
+    # Train the model
+    model = train_logistic_regression(train_exs, feat_extractor)
+    return model
+
+class NeuralSentimentClassifier(SentimentClassifier):
+    """
+    Implement your NeuralSentimentClassifier here. This should wrap an instance of the network with learned weights
+    along with everything needed to run it on new data (word embeddings, etc.)
+    """
+    def __init__(self, network, word_embeddings):
+        raise NotImplementedError
+
+
+def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_exs: List[SentimentExample], word_embeddings: WordEmbeddings) -> NeuralSentimentClassifier:
+    """
+    Main entry point for your deep averaging network model.
+    :param args: Command-line args so you can access them here
+    :param train_exs: training examples
+    :param dev_exs: development set, in case you wish to evaluate your model during training
+    :param word_embeddings: set of loaded word embeddings
+    :return: A trained NeuralSentimentClassifier model
+    """
+    raise NotImplementedError

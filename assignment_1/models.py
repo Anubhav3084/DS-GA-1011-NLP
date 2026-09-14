@@ -72,7 +72,23 @@ class UnigramFeatureExtractor(FeatureExtractor):
     """
 
     def __init__(self, indexer: Indexer):
-        raise Exception("Must be implemented")
+        self.indexer = indexer
+
+    def get_indexer(self):
+        return self.indexer
+
+    def extract_features(self, sentence, add_to_indexer, lowercase=False):
+        feature = Counter()
+        for word in sentence:
+            if lowercase: word = word.lower()
+            
+            # get the index
+            index = self.indexer.add_and_get_index(word) if add_to_indexer else self.indexer.index_of(word)
+            
+            # if the index is -1, skip; otherwise feats[index] += 1
+            if index != -1: feature[index] += 1
+
+        return feature
 
 
 class BigramFeatureExtractor(FeatureExtractor):
@@ -99,8 +115,19 @@ class LogisticRegressionClassifier(SentimentClassifier):
     superclass. Hint: you'll probably need this class to wrap both the weight vector and featurizer -- feel free to
     modify the constructor to pass these in.
     """
-    def __init__(self):
-        raise Exception("Must be implemented")
+    def __init__(self, weights, feature_extractor):
+        self.W = weights
+        self.feature_extractor = feature_extractor
+
+    def predict(self, sentence):
+        features = self.feature_extractor.extract_features(sentence=sentence, add_to_indexer=False)
+        idxs, values = list(features.keys()), list(features.values())
+        selected_weights = self.W[idxs]
+
+        z = np.dot(np.array(selected_weights), np.array(values))
+        prob = 1.0/(1.0 + np.exp(-1 * z))
+
+        return 1 if prob > 0.5 else 0
 
 
 def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor: FeatureExtractor) -> LogisticRegressionClassifier:
@@ -110,8 +137,55 @@ def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor:
     :param feat_extractor: feature extractor to use
     :return: trained LogisticRegressionClassifier model
     """
-    raise Exception("Must be implemented")
+    np.random.seed(42)
+    random.seed(42)
+    # build the indexer (vocabulary)
+    for sample in train_exs:
+        _ = feat_extractor.extract_features(sample.words, add_to_indexer=True)
+    vocab_size = len(feat_extractor.get_indexer())
+    weights = np.zeros(vocab_size)
 
+    lr_start = 0.005
+    epochs = 100
+
+    dev_exs = read_sentiment_examples("data/dev.txt")
+    dev_accuracies = []
+
+    for epoch in range(epochs):
+        random.shuffle(train_exs)
+        for sample in train_exs:
+            # extract features
+            words, label = sample.words, sample.label
+            features = feat_extractor.extract_features(sentence=words, add_to_indexer=False)
+
+            # compute scores
+            idxs, values = list(features.keys()), list(features.values())
+            selected_weights = weights[idxs]
+            z = np.dot(np.array(selected_weights), np.array(values))
+            pred = 1 / (1 + np.exp(-1 * z))
+            error = pred - label
+
+            # weight updated
+            lr = lr_start / (1 + 0.01 * epoch)
+            for idx, val in features.items():
+                weights[idx] -= lr * val * error
+
+        tempCLf = LogisticRegressionClassifier(weights=weights, feature_extractor=feat_extractor)
+        accuracy = 0
+        for sample in dev_exs:
+            words, label = sample.words, sample.label
+            pred = tempCLf.predict(words)
+            if pred == label: accuracy += 1
+        dev_accuracies.append(accuracy / len(dev_exs))
+        print(f"Epoch: [{epoch+1}/{epochs}], Accuracy: {np.round(accuracy / len(dev_exs), 5)}")
+
+    # plt.plot(dev_accuracies)
+    # plt.xlabel('Epochs')
+    # plt.ylabel('Accuracy')
+    # plt.title('Dev accuracy v/s Epoch')
+    # plt.show()
+
+    return LogisticRegressionClassifier(weights=weights, feature_extractor=feat_extractor)
 
 def train_linear_model(args, train_exs: List[SentimentExample], dev_exs: List[SentimentExample]) -> SentimentClassifier:
     """

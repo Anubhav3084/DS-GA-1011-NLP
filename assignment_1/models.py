@@ -146,10 +146,11 @@ def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor:
     weights = np.zeros(vocab_size)
 
     lr_start = 0.005
-    epochs = 100
+    epochs = 30
 
     dev_exs = read_sentiment_examples("data/dev.txt")
     dev_accuracies = []
+    log_likelihoods = []
 
     for epoch in range(epochs):
         random.shuffle(train_exs)
@@ -166,9 +167,25 @@ def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor:
             error = pred - label
 
             # weight updated
-            lr = lr_start / (1 + 0.01 * epoch)
+            # lr = lr_start / (1 + epoch)
+            lr = lr_start
             for idx, val in features.items():
                 weights[idx] -= lr * val * error
+
+        current_log_likelihood = 0
+        for sample in train_exs:
+            # extract features
+            words, label = sample.words, sample.label
+            features = feat_extractor.extract_features(sentence=words, add_to_indexer=False)
+            
+            # compute scores
+            idxs, values = list(features.keys()), list(features.values())
+            selected_weights = weights[idxs]
+            z = np.dot(np.array(selected_weights), np.array(values))
+            pred = 1 / (1 + np.exp(-1 * z))
+            epsilon = 1e-9 
+            current_log_likelihood += label * np.log(pred + epsilon) + (1 - label) * np.log(1 - pred + epsilon)
+        log_likelihoods.append(current_log_likelihood)
 
         tempCLf = LogisticRegressionClassifier(weights=weights, feature_extractor=feat_extractor)
         accuracy = 0
@@ -178,12 +195,29 @@ def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor:
             if pred == label: accuracy += 1
         dev_accuracies.append(accuracy / len(dev_exs))
         print(f"Epoch: [{epoch+1}/{epochs}], Accuracy: {np.round(accuracy / len(dev_exs), 5)}")
+    
+    # import pickle
+    # pickle.dump(
+    #     {'log_likelihoods': log_likelihoods, 'dev_accuracies': dev_accuracies, 'lr_schedule':'lr = decay with a factor or 1'},
+    #     open(f'results/decay_lr_2.pkl', 'wb')
+    # )
 
-    # plt.plot(dev_accuracies)
-    # plt.xlabel('Epochs')
-    # plt.ylabel('Accuracy')
-    # plt.title('Dev accuracy v/s Epoch')
-    # plt.show()
+    # import matplotlib.pyplot as plt
+    # fig, ax1 = plt.subplots()
+
+    # ax1.set_xlabel('Epochs')
+    # ax1.set_ylabel('Training Log-Likelihood', color='tab:blue')
+    # ax1.plot(log_likelihoods, color='tab:blue', marker='o')
+    # ax1.tick_params(axis='y', labelcolor='tab:blue')
+    # ax2 = ax1.twinx()
+    # ax2.set_ylabel('Development Accuracy', color='tab:red')
+    # ax2.plot(dev_accuracies, color='tab:red', marker='x')
+    # ax2.tick_params(axis='y', labelcolor='tab:red')
+
+    # plt.title(f'Performance vs. Epochs (LR={lr_start})')
+    # fig.tight_layout()
+    # plt.savefig('output.png')
+    # # plt.show()
 
     return LogisticRegressionClassifier(weights=weights, feature_extractor=feat_extractor)
 
@@ -216,14 +250,43 @@ def train_linear_model(args, train_exs: List[SentimentExample], dev_exs: List[Se
     return model
 
 
+class DAN(nn.Module):
+    def __init__(self, word_embeddings, hidden_layer, num_classes=1):
+        super(DAN, self).__init__()
+        self.embeddings = word_embeddings.get_initialized_embedding_layer()
+        self.embed_dim = self.embeddings.embedding_dim
+        self.hidden = hidden_layer
+        self.classes = num_classes
+
+        self.linear = nn.Linear(self.embed_dim, self.hidden, bias=True)
+        self.output = nn.Linear(self.hidden, self.classes, bias=True)
+
+    def forward(self, word_indices):
+        if type(word_indices) == list: word_indices = torch.tensor(word_indices, dtype=torch.long)
+        embeds = self.embeddings(word_indices)
+        embeds_avg = embeds.mean(axis=0)
+        x = nn.functional.relu(self.linear(embeds_avg))
+        x = torch.sigmoid(self.output(x))
+        return x
+
 class NeuralSentimentClassifier(SentimentClassifier):
     """
     Implement your NeuralSentimentClassifier here. This should wrap an instance of the network with learned weights
     along with everything needed to run it on new data (word embeddings, etc.)
     """
     def __init__(self, network, word_embeddings):
-        raise NotImplementedError
+        self.embeddings = word_embeddings
+        self.network = network
 
+    def predict(self, sentence):
+        word_indices = []
+        for word in sentence:
+            idx = self.embeddings.word_indexer.index_of(word)
+            if idx == -1: idx = self.embeddings.word_indexer.index_of("UNK")
+            word_indices.append(idx)
+        with torch.no_grad():
+            prob = self.network(word_indices)
+        return 1 if prob.item() > 0.5 else 0
 
 def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_exs: List[SentimentExample], word_embeddings: WordEmbeddings) -> NeuralSentimentClassifier:
     """
@@ -234,4 +297,60 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
     :param word_embeddings: set of loaded word embeddings
     :return: A trained NeuralSentimentClassifier model
     """
-    raise NotImplementedError
+    np.random.seed(0)
+    random.seed(0)
+
+    epochs = args.num_epochs
+    lr = args.lr
+    hidden_size = args.hidden_size
+
+    model = DAN(word_embeddings=word_embeddings, hidden_layer=hidden_size, num_classes=1)
+    loss_function = nn.BCELoss()
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+
+    dev_accuracies = []
+
+    for epoch in range(epochs):
+        model.train()
+        epoch_loss = 0.0
+
+        for sample in train_exs:
+            sentence, label = sample.words, sample.label
+            word_indices = []
+            for word in sentence:
+                idx = word_embeddings.word_indexer.index_of(word)
+                if idx == -1: idx = word_embeddings.word_indexer.index_of("UNK")
+                word_indices.append(idx)
+
+            # Handle empty sentences gracefully if any exist
+            if len(word_indices) == 0: continue
+                
+            # Clear previous gradients
+            model.zero_grad()
+            
+            # Forward pass to get probability prediction
+            prob = model(word_indices)
+            
+            # Create target label tensor matching the shape of prob (e.g., shape)
+            target = torch.tensor([float(label)], dtype=torch.float)
+            
+            # Compute loss, run backward pass, and update parameters
+            loss = loss_function(prob, target)
+            loss.backward()
+            optimizer.step()
+            
+            epoch_loss += loss.item()
+
+        model.eval()
+        tempCLf = NeuralSentimentClassifier(network=model, word_embeddings=word_embeddings)
+        accuracy = 0
+        with torch.no_grad():
+            for sample in dev_exs:
+                words, label = sample.words, sample.label
+                pred = tempCLf.predict(words)
+                if pred == label: accuracy += 1
+            dev_accuracies.append(accuracy / len(dev_exs))
+        print(f"Epoch: [{epoch+1}/{epochs}], Accuracy: {np.round(accuracy / len(dev_exs), 5)}, - Loss: {epoch_loss / len(train_exs):.4f}")
+
+    model.eval()
+    return NeuralSentimentClassifier(network=model, word_embeddings=word_embeddings)

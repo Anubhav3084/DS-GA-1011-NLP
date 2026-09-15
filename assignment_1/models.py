@@ -97,7 +97,27 @@ class BigramFeatureExtractor(FeatureExtractor):
     """
 
     def __init__(self, indexer: Indexer):
-        raise Exception("Must be implemented")
+        self.indexer = indexer
+    
+    def get_indexer(self):
+        return self.indexer
+
+    def extract_features(self, sentence, add_to_indexer, lowercase=True):
+        feature = Counter()
+        for i in range(len(sentence) - 1):
+            word_i, word_j = sentence[i], sentence[i+1]
+            if lowercase:
+                word_i = word_i.lower()
+                word_j = word_j.lower()
+            bigram = word_i + '|' + word_j
+
+            # get the index
+            index = self.indexer.add_and_get_index(bigram) if add_to_indexer else self.indexer.index_of(bigram)
+            
+            # if the index is -1, skip; otherwise feats[index] += 1
+            if index != -1: feature[index] += 1
+
+        return feature
 
 
 class BetterFeatureExtractor(FeatureExtractor):
@@ -151,6 +171,7 @@ def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor:
     dev_exs = read_sentiment_examples("data/dev.txt")
     dev_accuracies = []
     log_likelihoods = []
+    print(feat_extractor)
 
     for epoch in range(epochs):
         random.shuffle(train_exs)
@@ -199,7 +220,7 @@ def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor:
     # import pickle
     # pickle.dump(
     #     {'log_likelihoods': log_likelihoods, 'dev_accuracies': dev_accuracies, 'lr_schedule':'lr = decay with a factor or 1'},
-    #     open(f'results/decay_lr_2.pkl', 'wb')
+    #     open(f'results/bigram_decay_lr_2.pkl', 'wb')
     # )
 
     # import matplotlib.pyplot as plt
@@ -216,8 +237,7 @@ def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor:
 
     # plt.title(f'Performance vs. Epochs (LR={lr_start})')
     # fig.tight_layout()
-    # plt.savefig('output.png')
-    # # plt.show()
+    # plt.savefig('bigram_output.png')
 
     return LogisticRegressionClassifier(weights=weights, feature_extractor=feat_extractor)
 
@@ -261,11 +281,14 @@ class DAN(nn.Module):
         self.linear = nn.Linear(self.embed_dim, self.hidden, bias=True)
         self.output = nn.Linear(self.hidden, self.classes, bias=True)
 
+        self.dropout = nn.Dropout(p=0.3)
+
     def forward(self, word_indices):
         if type(word_indices) == list: word_indices = torch.tensor(word_indices, dtype=torch.long)
         embeds = self.embeddings(word_indices)
         embeds_avg = embeds.mean(axis=0)
         x = nn.functional.relu(self.linear(embeds_avg))
+        x = self.dropout(x)
         x = torch.sigmoid(self.output(x))
         return x
 
@@ -297,8 +320,8 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
     :param word_embeddings: set of loaded word embeddings
     :return: A trained NeuralSentimentClassifier model
     """
-    np.random.seed(0)
-    random.seed(0)
+    np.random.seed(42)
+    random.seed(42)
 
     epochs = args.num_epochs
     lr = args.lr
@@ -309,10 +332,13 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
     dev_accuracies = []
+    epoch_losses = []
 
     for epoch in range(epochs):
         model.train()
         epoch_loss = 0.0
+
+        random.shuffle(train_exs)
 
         for sample in train_exs:
             sentence, label = sample.words, sample.label
@@ -340,6 +366,7 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
             optimizer.step()
             
             epoch_loss += loss.item()
+        epoch_losses.append(epoch_loss)
 
         model.eval()
         tempCLf = NeuralSentimentClassifier(network=model, word_embeddings=word_embeddings)
@@ -351,6 +378,24 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
                 if pred == label: accuracy += 1
             dev_accuracies.append(accuracy / len(dev_exs))
         print(f"Epoch: [{epoch+1}/{epochs}], Accuracy: {np.round(accuracy / len(dev_exs), 5)}, - Loss: {epoch_loss / len(train_exs):.4f}")
+    
+    # import matplotlib.pyplot as plt
+    # fig, ax1 = plt.subplots()
+
+    # ax1.set_xlabel('Epochs')
+    # ax1.set_ylabel('Training loss', color='tab:blue')
+    # ax1.plot(epoch_losses, color='tab:blue', marker='o')
+    # ax1.tick_params(axis='y', labelcolor='tab:blue')
+    # ax2 = ax1.twinx()
+    # ax2.set_ylabel('Development Accuracy', color='tab:red')
+    # ax2.plot(dev_accuracies, color='tab:red', marker='x')
+    # ax2.tick_params(axis='y', labelcolor='tab:red')
+    # ax2.set_ylim(0.5, 1)
+
+    # plt.title(f'Performance vs. Epochs')
+    # fig.tight_layout()
+    # plt.savefig('output_DAN.png')
 
     model.eval()
-    return NeuralSentimentClassifier(network=model, word_embeddings=word_embeddings)
+    final_clf = NeuralSentimentClassifier(network=model, word_embeddings=word_embeddings)
+    return final_clf

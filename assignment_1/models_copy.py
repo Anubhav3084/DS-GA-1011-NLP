@@ -59,6 +59,34 @@ class UnigramFeatureExtractor(FeatureExtractor):
         return feature
 
 
+class BigramFeatureExtractor(FeatureExtractor):
+    """
+    Bigram feature extractor analogous to the unigram one.
+    """
+
+    def __init__(self, indexer: Indexer):
+        self.indexer = indexer
+    
+    def get_indexer(self):
+        return self.indexer
+
+    def extract_features(self, sentence, add_to_indexer, lowercase=True):
+        feature = Counter()
+        for i in range(len(sentence) - 1):
+            word_i, word_j = sentence[i], sentence[i+1]
+            if lowercase:
+                word_i = word_i.lower()
+                word_j = word_j.lower()
+            bigram = word_i + '|' + word_j
+
+            # get the index
+            index = self.indexer.add_and_get_index(bigram) if add_to_indexer else self.indexer.index_of(bigram)
+            
+            # if the index is -1, skip; otherwise feats[index] += 1
+            if index != -1: feature[index] += 1
+
+        return feature
+
 class SentimentClassifier(object):
     """
     Sentiment classifier base type
@@ -197,11 +225,14 @@ class DAN(nn.Module):
         self.linear = nn.Linear(self.embed_dim, self.hidden, bias=True)
         self.output = nn.Linear(self.hidden, self.classes, bias=True)
 
+        self.dropout = nn.Dropout(p=0.3)
+
     def forward(self, word_indices):
         if type(word_indices) == list: word_indices = torch.tensor(word_indices, dtype=torch.long)
         embeds = self.embeddings(word_indices)
         embeds_avg = embeds.mean(axis=0)
         x = nn.functional.relu(self.linear(embeds_avg))
+        x = self.dropout(x)
         x = torch.sigmoid(self.output(x))
         return x
 
@@ -233,8 +264,8 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
     :param word_embeddings: set of loaded word embeddings
     :return: A trained NeuralSentimentClassifier model
     """
-    np.random.seed(0)
-    random.seed(0)
+    np.random.seed(42)
+    random.seed(42)
 
     epochs = args.num_epochs
     lr = args.lr
@@ -249,6 +280,8 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
     for epoch in range(epochs):
         model.train()
         epoch_loss = 0.0
+
+        random.shuffle(train_exs)
 
         for sample in train_exs:
             sentence, label = sample.words, sample.label

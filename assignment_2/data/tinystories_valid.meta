@@ -1,0 +1,7 @@
+{
+  "bin_path": "tinystories_valid.bin",
+  "dtype": "uint16",
+  "num_tokens": 5438253,
+  "vocab_size": 10000,
+  "source": "TinyStories validation split, pre-tokenized with a 10K-vocab byte-level BPE tokenizer"
+}

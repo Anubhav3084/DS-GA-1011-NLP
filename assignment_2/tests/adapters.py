@@ -8,7 +8,7 @@ import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
-
+from student.modules import LinearLayer, EmbeddingLayer
 
 def run_linear(
     d_in: int,
@@ -28,8 +28,9 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
-
-    raise NotImplementedError
+    linear = LinearLayer(in_features=d_in, out_features=d_out)
+    linear.load_state_dict({'W':weights})
+    return linear(in_features)
 
 
 def run_embedding(
@@ -51,7 +52,9 @@ def run_embedding(
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
 
-    raise NotImplementedError
+    embeddings = EmbeddingLayer(num_embeddings=vocab_size, embedding_dim=d_model)
+    embeddings.load_state_dict({'E':weights})
+    return embeddings(token_ids)
 
 
 def run_swiglu(

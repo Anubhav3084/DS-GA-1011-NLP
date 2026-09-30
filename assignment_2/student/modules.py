@@ -97,3 +97,32 @@ class SwiGLU(nn.Module):
         x_W3 = self.W3(x)
         element_wise_mult = torch.mul(silg_x_W1, x_W3)
         return self.W2(element_wise_mult)
+
+class RoPE(nn.Module):
+    def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
+        super(RoPE, self).__init__()
+
+        self.theta = theta
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
+
+        inv_freq = 1.0 / (theta ** (torch.arange(0, d_k, 2, dtype=torch.float32, device=device) / d_k))
+        t = torch.arange(max_seq_len, dtype=torch.float32, device=device)
+        freqs = torch.outer(t, inv_freq)
+
+        self.register_buffer("cos_buffer", torch.cos(freqs), persistent=False)
+        self.register_buffer("sin_buffer", torch.sin(freqs), persistent=False)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor):
+        cos_sliced = self.cos_buffer[token_positions].to(dtype=x.dtype)
+        sin_sliced = self.sin_buffer[token_positions].to(dtype=x.dtype)
+
+        x_pairs = x.reshape(*x.shape[:-1], self.d_k // 2, 2)
+        x0 = x_pairs[..., 0]
+        x1 = x_pairs[..., 1]
+
+        out0 = x0 * cos_sliced - x1 * sin_sliced
+        out1 = x0 * cos_sliced + x1 * sin_sliced
+
+        out_combined = torch.stack([out0, out1], dim=-1)
+        return out_combined.reshape(x.shape)

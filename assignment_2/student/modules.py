@@ -134,5 +134,9 @@ def SoftmaxLayer(in_features: torch.Tensor, dim: int):
     sum_values = torch.sum(exp_values, dim=dim, keepdim=True)
     return exp_values / sum_values
 
-def AttentionLayer(Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, mask=None):
-    pass
+def AttentionLayer(Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, mask=None, dim=None):
+    d_k = Q.shape[-1]
+    Q_K_T = einsum(Q, K, " ... n d_k, ... m d_k -> ... n m") / math.sqrt(d_k)
+    masked_Q_K_T = torch.where(mask, Q_K_T, float('-inf'))
+    probs = SoftmaxLayer(masked_Q_K_T, dim=-1)
+    return einsum(probs, V, " ... n m, ... m d_v -> ... n d_v")

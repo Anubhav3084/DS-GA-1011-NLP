@@ -8,7 +8,7 @@ import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
-from student.modules import LinearLayer, EmbeddingLayer, RMSNormLayer, SwiGLU, RoPE
+from student.modules import LinearLayer, EmbeddingLayer, RMSNormLayer, SwiGLU, RoPE, SoftmaxLayer
 
 def run_linear(
     d_in: int,
@@ -87,7 +87,6 @@ def run_swiglu(
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
     swiglu = SwiGLU(d_model=d_model, d_ff=d_ff)
-    # swiglu.load_state_dict({'W1': w1_weight, 'W2': w2_weight, 'W3': w3_weight})
     swiglu.W1.W.data = w1_weight
     swiglu.W2.W.data = w2_weight
     swiglu.W3.W.data = w3_weight
@@ -446,7 +445,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    raise NotImplementedError
+    return SoftmaxLayer(in_features=in_features, dim=dim)
 
 
 def run_cross_entropy(

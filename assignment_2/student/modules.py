@@ -126,3 +126,13 @@ class RoPE(nn.Module):
 
         out_combined = torch.stack([out0, out1], dim=-1)
         return out_combined.reshape(x.shape)
+
+def SoftmaxLayer(in_features: torch.Tensor, dim: int):
+    max_val_in_dim = torch.max(in_features, dim=dim, keepdim=True).values
+    adjusted_values = in_features - max_val_in_dim
+    exp_values = torch.exp(adjusted_values)
+    sum_values = torch.sum(exp_values, dim=dim, keepdim=True)
+    return exp_values / sum_values
+
+def AttentionLayer(Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, mask=None):
+    pass

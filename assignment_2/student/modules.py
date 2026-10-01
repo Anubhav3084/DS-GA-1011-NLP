@@ -108,10 +108,10 @@ class RoPE(nn.Module):
 
         inv_freq = 1.0 / (theta ** (torch.arange(0, d_k, 2, dtype=torch.float32, device=device) / d_k))
         t = torch.arange(max_seq_len, dtype=torch.float32, device=device)
-        freqs = torch.outer(t, inv_freq)
+        thetas = einsum(t, inv_freq, "i,j -> i j")
 
-        self.register_buffer("cos_buffer", torch.cos(freqs), persistent=False)
-        self.register_buffer("sin_buffer", torch.sin(freqs), persistent=False)
+        self.register_buffer("cos_buffer", torch.cos(thetas), persistent=False)
+        self.register_buffer("sin_buffer", torch.sin(thetas), persistent=False)
 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor):
         cos_sliced = self.cos_buffer[token_positions].to(dtype=x.dtype)
@@ -122,7 +122,7 @@ class RoPE(nn.Module):
         x1 = x_pairs[..., 1]
 
         out0 = x0 * cos_sliced - x1 * sin_sliced
-        out1 = x0 * cos_sliced + x1 * sin_sliced
+        out1 = x0 * sin_sliced + x1 * cos_sliced
 
         out_combined = torch.stack([out0, out1], dim=-1)
         return out_combined.reshape(x.shape)

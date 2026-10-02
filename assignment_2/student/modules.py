@@ -256,3 +256,53 @@ class TransformerLM(nn.Module):
         x = self.norm(x)
         x = self.linear(x)
         return x
+
+class AdamW(torch.optim.Optimizer):
+    def __init__(self, params, lr: float = 1e-3, betas: tuple[float] = (0.9, 0.999), eps: float = 1e-8, weight_decay: float = 0.01):
+        if lr < 0.0: raise ValueError(f"Invalid learning rate: {lr}")
+        if eps < 0.0: raise ValueError(f"Invalid epsilon value: {eps}")
+        if not 0.0 <= betas[0] < 1.0: raise ValueError(f"Invalid beta1 parameter: {betas[0]}")
+        if not 0.0 <= betas[1] < 1.0: raise ValueError(f"Invalid beta2 parameter: {betas[1]}")
+        if weight_decay < 0.0: raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+
+        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)                
+        super(AdamW, self).__init__(params, defaults)
+
+    @torch.no_grad()
+    def step(self, closure = None):
+        loss = None if closure is None else closure()
+        for group in self.param_groups:
+            beta1, beta2 = group['betas']
+            alpha = group['lr']
+            eps = group['eps']
+            lambd = group['weight_decay']
+
+            for p in group['params']:
+
+                state = self.state[p]
+                g = p.grad
+                
+                if g is None: continue
+
+                if len(state) == 0:
+                    state['t'] = 1
+                    state['m'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    state['v'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
+                t, m, v = state['t'], state['m'], state['v']
+
+                # compute the moments
+                m.mul_(beta1).add_(g, alpha = 1 - beta1)
+                v.mul_(beta2).addcmul_(g, g, value = 1 - beta2)
+
+                # update the learning rate
+                correction_numerator = 1 - beta2 ** t
+                correction_denominator = 1 - beta1 ** t
+                alpha_updated = alpha * (correction_numerator ** 0.5) / correction_denominator
+
+                # update parameters and apply weight decay
+                p.addcdiv_(m, v.sqrt().add_(eps), value = -alpha_updated)
+                if lambd != 0: p.add_(p, alpha = -alpha * lambd)
+                state['t'] = t + 1
+                
+        return loss

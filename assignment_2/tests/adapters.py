@@ -8,7 +8,7 @@ import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
-from student.modules import LinearLayer, EmbeddingLayer, RMSNormLayer, SwiGLU, RoPE, SoftmaxLayer, AttentionLayer, MultiHeadSelfAttentionLayer
+from student.modules import *
 
 def run_linear(
     d_in: int,

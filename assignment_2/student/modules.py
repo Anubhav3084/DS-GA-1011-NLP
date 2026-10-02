@@ -178,3 +178,31 @@ class MultiHeadSelfAttentionLayer(nn.Module):
         multihead_attention = rearrange(multihead_attention, " ... heads seq d_v -> ... seq (heads d_v)", heads=self.h)
         return self.Output(multihead_attention)
 
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int, max_seq_len: int, theta: float, device=None, dtype=None):
+        super(TransformerBlock, self)
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.max_seq_len = max_seq_len
+        self.theta = theta
+
+        # layer 1
+        self.rmsnorm1 = RMSNormLayer(d_model=self.d_model, device=device, dtype=dtype)
+        self.multihead = MultiHeadSelfAttentionLayer(
+                            d_model=self.d_model,
+                            num_heads=self.num_heads,
+                            max_seq_len=self.max_seq_len,
+                            theta=self.theta,
+                            device=device,
+                            dtype=dtype
+                        )
+        ## layer 2
+        self.rmsnorm2 = RMSNormLayer(d_model=d_model, device=device)
+        self.ffn = SwiGLU(d_model=self.d_model, d_ff=self.d_ff, device=device, dtype=dtype)
+
+    def forward(self, x):
+        y = x + self.multihead(self.rmsnorm1(x))
+        out = y + self.ffn(self.rmsnorm2(y))
+        return out

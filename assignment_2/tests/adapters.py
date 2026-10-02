@@ -298,7 +298,33 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    new_state_dict = {
+        "multihead.Query.W": weights["attn.q_proj.weight"],
+        "multihead.Key.W": weights["attn.k_proj.weight"],
+        "multihead.Value.W": weights["attn.v_proj.weight"],
+        "multihead.Output.W": weights["attn.output_proj.weight"],
+
+        "rmsnorm1.g": weights["ln1.weight"],
+        "rmsnorm2.g": weights["ln2.weight"],
+
+        "ffn.W1.W": weights["ffn.w1.weight"],
+        "ffn.W2.W": weights["ffn.w2.weight"],
+        "ffn.W3.W": weights["ffn.w3.weight"]
+    }
+    transformerblock = TransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff, max_seq_len=max_seq_len, theta=theta)
+    # transformerblock.load_state_dict(new_state_dict)
+    transformerblock.multihead.Query.W.data =  weights["attn.q_proj.weight"]
+    transformerblock.multihead.Key.W.data =  weights["attn.k_proj.weight"]
+    transformerblock.multihead.Value.W.data =  weights["attn.v_proj.weight"]
+    transformerblock.multihead.Output.W.data =  weights["attn.output_proj.weight"]
+
+    transformerblock.rmsnorm1.g.data =  weights["ln1.weight"]
+    transformerblock.rmsnorm2.g.data =  weights["ln2.weight"]
+
+    transformerblock.ffn.W1.W.data =  weights["ffn.w1.weight"]
+    transformerblock.ffn.W2.W.data =  weights["ffn.w2.weight"]
+    transformerblock.ffn.W3.W.data =  weights["ffn.w3.weight"]
+    return transformerblock(in_features)
 
 
 def run_transformer_lm(

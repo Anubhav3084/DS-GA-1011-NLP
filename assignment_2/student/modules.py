@@ -168,11 +168,11 @@ class MultiHeadSelfAttentionLayer(nn.Module):
         K_out = rearrange(K_out, " ... seq (heads d_k) -> ... heads seq d_k", heads=self.h)
         V_out = rearrange(V_out, " ... seq (heads d_v) -> ... heads seq d_v", heads=self.h)
 
+        seq_len = x.shape[-2]
         if token_positions is not None:
             Q_out = self.rope(Q_out, token_positions)
             K_out = self.rope(K_out, token_positions)
-
-        seq_len = x.shape[-2]
+        
         mask = torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device))
         multihead_attention = AttentionLayer(Q_out, K_out, V_out, mask=mask)
         multihead_attention = rearrange(multihead_attention, " ... heads seq d_v -> ... seq (heads d_v)", heads=self.h)
@@ -180,7 +180,7 @@ class MultiHeadSelfAttentionLayer(nn.Module):
 
 class TransformerBlock(nn.Module):
     def __init__(self, d_model: int, num_heads: int, d_ff: int, max_seq_len: int, theta: float, device=None, dtype=None):
-        super(TransformerBlock, self)
+        super(TransformerBlock, self).__init__()
 
         self.d_model = d_model
         self.num_heads = num_heads
@@ -199,10 +199,15 @@ class TransformerBlock(nn.Module):
                             dtype=dtype
                         )
         ## layer 2
-        self.rmsnorm2 = RMSNormLayer(d_model=d_model, device=device)
+        self.rmsnorm2 = RMSNormLayer(d_model=self.d_model, device=device, dtype=dtype)
         self.ffn = SwiGLU(d_model=self.d_model, d_ff=self.d_ff, device=device, dtype=dtype)
 
-    def forward(self, x):
-        y = x + self.multihead(self.rmsnorm1(x))
+    def forward(self, x, token_positions=None):
+        
+        seq_len = x.shape[-2]
+        if token_positions is None: token_positions = torch.arange(seq_len, device=x.device)
+        
+        y = x + self.multihead(self.rmsnorm1(x), token_positions)
         out = y + self.ffn(self.rmsnorm2(y))
         return out
+

@@ -211,3 +211,48 @@ class TransformerBlock(nn.Module):
         out = y + self.ffn(self.rmsnorm2(y))
         return out
 
+class TransformerLM(nn.Module):
+    def __init__(
+            self, 
+            vocab_size: int,
+            context_length: int,
+            d_model: int,
+            num_layers: int,
+            num_heads: int,
+            d_ff: int,
+            rope_theta: float,
+            device=None,
+            dtype=None
+        ):
+        super(TransformerLM, self).__init__()
+
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.d_model = d_model
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.rope_theta = rope_theta
+
+        self.token_embedding = EmbeddingLayer(num_embeddings=self.vocab_size, embedding_dim=self.d_model, device=device, dtype=dtype)
+        self.blocks = nn.ModuleList([
+            TransformerBlock(
+                d_model=self.d_model,
+                num_heads=self.num_heads,
+                d_ff=self.d_ff,
+                max_seq_len=self.context_length,
+                theta=self.rope_theta,
+                device=device,
+                dtype=dtype
+            ) for _ in range(self.num_layers)
+        ])
+        self.norm = RMSNormLayer(d_model=self.d_model, device=device, dtype=dtype)
+        self.linear = LinearLayer(in_features=self.d_model, out_features=self.vocab_size, device=device, dtype=dtype)
+
+    def forward(self, token_ids):
+        x = self.token_embedding(token_ids)
+        for block in self.blocks:
+            x = block(x)
+        x = self.norm(x)
+        x = self.linear(x)
+        return x

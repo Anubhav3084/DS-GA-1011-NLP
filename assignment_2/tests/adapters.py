@@ -312,18 +312,7 @@ def run_transformer_block(
         "ffn.W3.W": weights["ffn.w3.weight"]
     }
     transformerblock = TransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff, max_seq_len=max_seq_len, theta=theta)
-    # transformerblock.load_state_dict(new_state_dict)
-    transformerblock.multihead.Query.W.data =  weights["attn.q_proj.weight"]
-    transformerblock.multihead.Key.W.data =  weights["attn.k_proj.weight"]
-    transformerblock.multihead.Value.W.data =  weights["attn.v_proj.weight"]
-    transformerblock.multihead.Output.W.data =  weights["attn.output_proj.weight"]
-
-    transformerblock.rmsnorm1.g.data =  weights["ln1.weight"]
-    transformerblock.rmsnorm2.g.data =  weights["ln2.weight"]
-
-    transformerblock.ffn.W1.W.data =  weights["ffn.w1.weight"]
-    transformerblock.ffn.W2.W.data =  weights["ffn.w2.weight"]
-    transformerblock.ffn.W3.W.data =  weights["ffn.w3.weight"]
+    transformerblock.load_state_dict(new_state_dict)
     return transformerblock(in_features)
 
 
@@ -406,7 +395,36 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    new_state_dict = {}
+    for i in range(num_layers):
+        prefix_theirs = f"layers.{i}."
+        prefix_mine = f"blocks.{i}."
+
+        new_state_dict[prefix_mine + "rmsnorm1.g"] = weights[prefix_theirs + "ln1.weight"]
+        new_state_dict[prefix_mine + "rmsnorm2.g"] = weights[prefix_theirs + "ln2.weight"]
+        new_state_dict[prefix_mine + "multihead.Query.W"] = weights[prefix_theirs + "attn.q_proj.weight"]
+        new_state_dict[prefix_mine + "multihead.Key.W"] = weights[prefix_theirs + "attn.k_proj.weight"]
+        new_state_dict[prefix_mine + "multihead.Value.W"] = weights[prefix_theirs + "attn.v_proj.weight"]
+        new_state_dict[prefix_mine + "multihead.Output.W"] = weights[prefix_theirs + "attn.output_proj.weight"]
+        new_state_dict[prefix_mine + "ffn.W1.W"] = weights[prefix_theirs + "ffn.w1.weight"]
+        new_state_dict[prefix_mine + "ffn.W2.W"] = weights[prefix_theirs + "ffn.w2.weight"]
+        new_state_dict[prefix_mine + "ffn.W3.W"] = weights[prefix_theirs + "ffn.w3.weight"]
+
+    new_state_dict["token_embedding.E"] = weights["token_embeddings.weight"]
+    new_state_dict["norm.g"] = weights["ln_final.weight"]
+    new_state_dict["linear.W"] = weights["lm_head.weight"]
+    
+    transformer_lm = TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta
+    )
+    transformer_lm.load_state_dict(new_state_dict)
+    return transformer_lm(in_indices)
 
 
 def run_rmsnorm(

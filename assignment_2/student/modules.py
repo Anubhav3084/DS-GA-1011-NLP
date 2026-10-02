@@ -1,7 +1,7 @@
 import math
 import torch
 import torch.nn as nn
-from einops import einsum
+from einops import einsum, rearrange
 
 class LinearLayer(nn.Module):
     def __init__(self, in_features: int, out_features: int, device=None, dtype=None):
@@ -134,9 +134,47 @@ def SoftmaxLayer(in_features: torch.Tensor, dim: int):
     sum_values = torch.sum(exp_values, dim=dim, keepdim=True)
     return exp_values / sum_values
 
-def AttentionLayer(Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, mask=None, dim=None):
-    d_k = Q.shape[-1]
-    Q_K_T = einsum(Q, K, " ... n d_k, ... m d_k -> ... n m") / math.sqrt(d_k)
-    masked_Q_K_T = torch.where(mask, Q_K_T, float('-inf'))
+def AttentionLayer(Query: torch.Tensor, Key: torch.Tensor, Value: torch.Tensor, mask=None, dim=None):
+    d_k = Query.shape[-1]
+    Q_K_T = einsum(Query, Key, " ... n d_k, ... m d_k -> ... n m") / math.sqrt(d_k)
+    if mask is not None: masked_Q_K_T = torch.where(mask, Q_K_T, float('-inf'))
+    else: masked_Q_K_T = Q_K_T
     probs = SoftmaxLayer(masked_Q_K_T, dim=-1)
-    return einsum(probs, V, " ... n m, ... m d_v -> ... n d_v")
+    return einsum(probs, Value, " ... n m, ... m d_v -> ... n d_v")
+
+class MultiHeadSelfAttentionLayer(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, max_seq_len: int, theta: float = None, device=None, dtype=None):
+        super(MultiHeadSelfAttentionLayer, self).__init__()
+        self.d_model = d_model
+        self.h = num_heads
+        self.d_k = self.d_model // self.h
+        self.d_v = self.d_model // self.h
+        self.max_seq_len = max_seq_len
+        self.device = device
+
+        self.Query = LinearLayer(in_features=self.d_model, out_features=self.d_k * self.h, device=device, dtype=dtype)
+        self.Key = LinearLayer(in_features=self.d_model, out_features=self.d_k * self.h, device=device, dtype=dtype)
+        self.Value = LinearLayer(in_features=self.d_model, out_features=self.d_v * self.h, device=device, dtype=dtype)
+
+        self.Output = LinearLayer(in_features=self.d_v * self.h, out_features=self.d_model, device=device, dtype=dtype)
+
+        if theta is not None: self.rope = RoPE(theta=theta, d_k=self.d_k, max_seq_len=self.max_seq_len, device=device)
+
+    def forward(self, x, token_positions=None):
+        Q_out = self.Query(x)
+        K_out = self.Key(x)
+        V_out = self.Value(x)
+        Q_out = rearrange(Q_out, " ... seq (heads d_k) -> ... heads seq d_k", heads=self.h)
+        K_out = rearrange(K_out, " ... seq (heads d_k) -> ... heads seq d_k", heads=self.h)
+        V_out = rearrange(V_out, " ... seq (heads d_v) -> ... heads seq d_v", heads=self.h)
+
+        if token_positions is not None:
+            Q_out = self.rope(Q_out, token_positions)
+            K_out = self.rope(K_out, token_positions)
+
+        seq_len = x.shape[-2]
+        mask = torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device))
+        multihead_attention = AttentionLayer(Q_out, K_out, V_out, mask=mask)
+        multihead_attention = rearrange(multihead_attention, " ... heads seq d_v -> ... seq (heads d_v)", heads=self.h)
+        return self.Output(multihead_attention)
+

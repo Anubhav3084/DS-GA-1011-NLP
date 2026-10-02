@@ -1,6 +1,8 @@
 import math
 import torch
+import numpy as np
 import torch.nn as nn
+import numpy.typing as npt
 from einops import einsum, rearrange
 
 class LinearLayer(nn.Module):
@@ -78,6 +80,9 @@ class RMSNormLayer(nn.Module):
         rms = torch.sqrt(torch.mean(x_float ** 2, dim=-1, keepdim=True) + self.eps)
         rmsnorm = (x_float / rms) * self.g.to(torch.float32)
         return rmsnorm.to(in_dtype)
+
+def SiLU(x):
+    return x * torch.sigmoid(x)
 
 class SwiGLU(nn.Module):
     def __init__(self, d_model: int, d_ff: int, device=None, dtype=None):
@@ -306,3 +311,44 @@ class AdamW(torch.optim.Optimizer):
                 state['t'] = t + 1
                 
         return loss
+
+def cross_entropy(inputs: torch.Tensor, targets: torch.Tensor):
+    adjusted = inputs - inputs.max(dim=-1, keepdim=True).values
+    log_sum = torch.log(torch.exp(adjusted).sum(dim=-1))
+    target_logits = adjusted.gather(-1, targets.unsqueeze(-1)).squeeze(-1)
+    return (log_sum - target_logits).mean()
+
+def get_lr_cosine_schedule(it: int, max_learning_rate: float, min_learning_rate: float, warmup_iters: int, cosine_cycle_iters: int):
+    if it < warmup_iters:
+        return it / warmup_iters * max_learning_rate
+    elif it >= warmup_iters and it <= cosine_cycle_iters:
+        return min_learning_rate + 0.5 * (
+            1 + math.cos((it - warmup_iters) / (cosine_cycle_iters - warmup_iters) * math.pi)
+        ) * (max_learning_rate - min_learning_rate)
+    else: return min_learning_rate
+
+
+def gradient_clipping(parameters, max_l2_norm: float, eps: float = 1e-6) -> None:
+    
+    grads = [p.grad for p in parameters if p.grad is not None]
+    if len(grads) == 0: return
+
+    total_norm = torch.sqrt(sum((g ** 2).sum() for g in grads))
+
+    if total_norm > max_l2_norm:
+        scale = max_l2_norm / (total_norm + eps)
+        for g in grads:
+            g.mul_(scale)
+
+def get_batch(dataset: npt.NDArray, batch_size: int, context_length: int, device: str):
+
+    n = len(dataset)
+    starting_idxs = np.random.randint(0, n - context_length, batch_size)
+
+    inputs = np.stack([dataset[s : s + context_length] for s in starting_idxs])
+    targets = np.stack([dataset[s + 1 : s + context_length + 1] for s in starting_idxs])
+
+    inputs = torch.tensor(inputs, dtype=torch.long, device=device)
+    targets = torch.tensor(targets, dtype=torch.long, device=device)
+
+    return (inputs, targets)

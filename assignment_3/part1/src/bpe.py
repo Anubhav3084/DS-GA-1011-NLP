@@ -127,7 +127,9 @@ class ASCIIBPETokenizer:
         """
 
         assert all(ord(c) < 128 for c in text), "input text is not ASCII"
-        token_ids = ...
+        token_ids = string_to_ascii(text)
+        for bigram, merged_id in self.merge_rules.items():
+            token_ids = replace_bigram(token_ids, bigram, merged_id)
         return token_ids
 
     def decode(self, token_ids: list[int]) -> str:
@@ -139,7 +141,7 @@ class ASCIIBPETokenizer:
         Returns:
             str: An ASCII string.
         """
-        return ...
+        return "".join(self.vocab[t] for t in token_ids)
 
     @classmethod
     def from_config(cls, config_file: str):

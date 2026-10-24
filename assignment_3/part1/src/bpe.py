@@ -98,7 +98,23 @@ class ASCIIBPETokenizer:
             list[int]: New list of token ids, after one merge step
         """
 
-        return ...
+        bigram_frequencies = compute_bigram_statistics(token_ids)
+        
+        # find the most frequent bigram lexicographically
+        max_val = max(bigram_frequencies.values())
+        filt_bigram_frequencies = {k: v for k, v in bigram_frequencies.items() if v == max_val}
+        if len(filt_bigram_frequencies) > 1:
+            filt_bigram_frequencies = dict(sorted(filt_bigram_frequencies.items()))
+        merged_bigram = list(filt_bigram_frequencies.keys())[0]
+    
+        # merge the tokens and update the vocab and merge rules
+        new_token = self.vocab[merged_bigram[0]] + self.vocab[merged_bigram[1]]
+        merged_bigram_id = len(self.vocab)
+        self.vocab = self.vocab + [new_token]
+        self.merge_rules[merged_bigram] = merged_bigram_id
+    
+        new_token_ids = replace_bigram(token_ids, merged_bigram, merged_bigram_id)
+        return new_token_ids
 
     def encode(self, text: str) -> list[int]:
         """Convert text to tokens.

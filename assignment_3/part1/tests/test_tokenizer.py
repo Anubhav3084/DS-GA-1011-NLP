@@ -10,8 +10,9 @@ def test_not_injective():
     tokenizer_name = "google-bert/bert-base-cased"
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
-    s1 = ...
-    s2 = ...
+    # bert based tokenizer reduces mutiple blank spaces to a single space so even though the strings are different, the tokens are same
+    s1 = "Hi my  name is   Anubhav   "
+    s2 = "Hi my name is Anubhav"
 
     assert s1 != s2 and tokenizer.encode(
         s1, add_special_tokens=False
@@ -24,7 +25,8 @@ def test_not_invertible():
     tokenizer_name = "google-bert/bert-base-cased"
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
-    s = ...
+    # bert based tokenizer reduces mutiple blank spaces to a single space so after decoding the tokens we won't get the original extra spaces back
+    s = "Hi my  name is   Anubhav   "
 
     s_recovered = tokenizer.decode(tokenizer.encode(s, add_special_tokens=False))
     assert s != s_recovered
@@ -36,8 +38,9 @@ def test_not_preserving_concat():
     tokenizer_name = "google-bert/bert-base-cased"
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
-    a = ...
-    b = ...
+    # bert based tokenizer is build on WordPieces algorithm so it won't preserve the concatenation property
+    a = "Hi my  name is   Anu"
+    b = "bhav"
     assert tokenizer.encode(a + b, add_special_tokens=False) != tokenizer.encode(
         a, add_special_tokens=False
     ) + tokenizer.encode(b, add_special_tokens=False)
@@ -226,7 +229,7 @@ def test_100_merges():
         (119, 175): 227,
     }
 
-def test_wrapper(func):
+def run_wrapper(func):
     try:
         func()
         print(f"{func.__name__} passed")
@@ -241,12 +244,12 @@ if __name__ == "__main__":
     print(f"Running {test_type} tests...")
 
     if test_type == "properties":
-        test_wrapper(func=test_not_injective)
-        test_wrapper(func=test_not_invertible)
-        test_wrapper(func=test_not_preserving_concat)
+        run_wrapper(func=test_not_injective)
+        run_wrapper(func=test_not_invertible)
+        run_wrapper(func=test_not_preserving_concat)
     else:
-        test_wrapper(func=test_encode)
-        test_wrapper(func=test_decode)
-        test_wrapper(func=test_one_merge)
-        test_wrapper(func=test_two_merges)
-        test_wrapper(func=test_100_merges)
+        run_wrapper(func=test_encode)
+        run_wrapper(func=test_decode)
+        run_wrapper(func=test_one_merge)
+        run_wrapper(func=test_two_merges)
+        run_wrapper(func=test_100_merges)
